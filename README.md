@@ -53,7 +53,7 @@ yourself with `python build.py`).
 ## Troubleshooting
 
 The log is at `%APPDATA%\Road to Vostok\logs\godot.log` (written when the game closes). Look for
-`[AIActuallyLoots] v1.1.5 loaded`. Every item an AI takes is logged as `[AIActuallyLoots] <AI> looted <item>`.
+`[AIActuallyLoots] v1.1.6 loaded`. Every item an AI takes is logged as `[AIActuallyLoots] <AI> looted <item>`.
 
 ## Credits
 

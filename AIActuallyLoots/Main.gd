@@ -16,7 +16,7 @@ extends Node
 ## Bosses are left alone. Works on its own or alongside other AI mods.
 
 
-const VERSION := "1.1.5"
+const VERSION := "1.1.6"
 const TAG := "[AIActuallyLoots] "
 
 
@@ -81,6 +81,8 @@ func _on_node_added(node):
 ## ------------------------------------------------------------------------------------------------ deciding
 
 func _physics_process(_delta):
+	# Map transitions free the old map's AI, containers and bodies: do nothing until the new map is up.
+	if get_tree().current_scene == null || _game_data().transition: return
 	var now := _now()
 	if now - _botsT > 1.0:
 		_botsT = now
@@ -89,7 +91,7 @@ func _physics_process(_delta):
 	for i in min(BOTS_PER_FRAME, _bots.size()):
 		_tickIndex = (_tickIndex + 1) % _bots.size()
 		var ai = _bots[_tickIndex]
-		if is_instance_valid(ai) && !ai.dead && ai.active: _tick(ai, now)
+		if is_instance_valid(ai) && !ai.dead && ai.active && ai.is_inside_tree(): _tick(ai, now)
 
 func _tick(ai, now: float):
 	if ai.has_meta("aal_loot"):
@@ -132,14 +134,14 @@ func _pick_target(ai, now: float, reach: float):
 	if ai.has_meta("aal_kill"):
 		var kill = ai.get_meta("aal_kill")
 		ai.remove_meta("aal_kill")
-		if is_instance_valid(kill) && kill.global_position.distance_to(origin) < CORPSE_RANGE: return kill
+		if is_instance_valid(kill) && kill.is_inside_tree() && kill.global_position.distance_to(origin) < CORPSE_RANGE: return kill
 
 
 	var best = null
 	var bestDist := min(reach, CORPSE_RANGE)
 	for entry in _corpses:
 		var c = entry["c"]
-		if !is_instance_valid(c) || now - float(entry["t"]) > CORPSE_FRESH || _reserved(c, ai, now): continue
+		if !is_instance_valid(c) || !c.is_inside_tree() || now - float(entry["t"]) > CORPSE_FRESH || _reserved(c, ai, now): continue
 		if now - float(_visited(ai).get(c.get_instance_id(), -INF)) < VISIT_FORGET: continue
 		# Bandits strip anyone; everyone else only loots enemies.
 		if entry["faction"] == ai.variant.faction && ai.variant.faction != AIData.Faction.Bandit: continue
@@ -197,7 +199,9 @@ func _approach(ai, c):
 	var toward: Vector3 = ai.global_position - base
 	toward.y = 0.0
 	toward = toward.normalized() if toward.length() > 0.01 else Vector3.FORWARD
-	var space = ai.get_world_3d().direct_space_state
+	var world = ai.get_world_3d() if ai.is_inside_tree() else null
+	if world == null: return null
+	var space = world.direct_space_state
 	for angle in [0.0, 90.0, -90.0, 180.0]:
 		var want: Vector3 = base + toward.rotated(Vector3.UP, deg_to_rad(angle)) * APPROACH_DIST
 		var spot: Vector3 = NavigationServer3D.map_get_closest_point(ai.navmesh, want)
@@ -384,7 +388,7 @@ func _live_ai() -> Array:
 	var found := []
 	for node in get_tree().get_nodes_in_group("AI"):
 		var ai = node.owner if node.owner != null else node
-		if _affects(ai) && "dead" in ai && !ai.dead && ai.active && !(ai in found): found.append(ai)
+		if _affects(ai) && "dead" in ai && !ai.dead && ai.active && ai.is_inside_tree() && !(ai in found): found.append(ai)
 	return found
 
 func _has_loot(c) -> bool:
@@ -406,6 +410,9 @@ func _reserved(c, ai, now: float) -> bool:
 func _visited(ai) -> Dictionary:
 	if !ai.has_meta("aal_visited"): ai.set_meta("aal_visited", {})
 	return ai.get_meta("aal_visited")
+
+func _game_data():
+	return preload("res://Resources/GameData.tres")
 
 func _now() -> float:
 	return Time.get_ticks_msec() / 1000.0

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.1.6
+- Fixed a crash when travelling to another map (looting checks could touch AI and containers of the map being unloaded).
+
 ## 1.1.5
 - Fixed AI still looting containers set against a wall (e.g. garbage piles) from the other side of it.
 

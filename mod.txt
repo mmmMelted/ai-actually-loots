@@ -1,7 +1,7 @@
 [mod]
 name="AI Actually Loots"
 id="ai_actually_loots"
-version="1.1.5"
+version="1.1.6"
 priority=0
 
 [autoload]
