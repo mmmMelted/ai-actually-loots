@@ -1,0 +1,11 @@
+[mod]
+name="AI Actually Loots"
+id="ai_actually_loots"
+version="1.1.5"
+priority=0
+
+[autoload]
+AIActuallyLoots="res://AIActuallyLoots/Main.gd"
+
+[hooks]
+res://Scripts/AI.gd = "Loot, ChangeState, WeaponDamage, Death"
