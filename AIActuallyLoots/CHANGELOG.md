@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.7
+- Fixed looted items disappearing: when an AI's inventory was full, items that didn't fit its grid were deleted the
+  first time you opened the body. AI now only take items that fit, and stop looting once nothing more fits.
+
 ## 1.1.6
 - Fixed a crash when travelling to another map (looting checks could touch AI and containers of the map being unloaded).
 

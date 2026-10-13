@@ -6,8 +6,8 @@ extends Node
 ## GetLootPoint() always returns false. This mod finds targets itself and hands them to the game's own looting.
 ##
 ## - Calm AI (not alerted or fighting) walk to nearby containers and take 1-3 items into their own inventory (you find
-##   them on the body). Bandits loot often; Guards and Military only very rarely (about once per 5 / 10 calm minutes);
-##   Nomads never loot.
+##   them on the body), only what fits their inventory grid. Bandits loot often; Guards and Military only very rarely
+##   (about once per 5 / 10 calm minutes); Nomads never loot.
 ## - Hiders (AI waiting in ambush in houses) loot the house instead of standing still, return to their hide spot, and
 ##   drop everything to get back into ambush the moment something approaches.
 ## - After a kill, the killer loots the body once things calm down; other calm AI scavenge fresh bodies nearby
@@ -16,7 +16,7 @@ extends Node
 ## Bosses are left alone. Works on its own or alongside other AI mods.
 
 
-const VERSION := "1.1.6"
+const VERSION := "1.1.7"
 const TAG := "[AIActuallyLoots] "
 
 
@@ -104,6 +104,8 @@ func _tick(ai, now: float):
 	# Nomads never loot (houses, bodies or their own kills).
 	if ai.variant.faction == AIData.Faction.Nomad: return
 	if !_calm(ai) || ai.reload || ai.container == null || ai.container.loot.size() >= CARRY_LIMIT: return
+	# Inventory full: not even a 1x1 item would fit.
+	if !_fits(ai.container, Vector2.ONE): return
 	var states = ai.State
 	var state: int = ai.currentState
 	var hider: bool = state == states.Ambush
@@ -247,7 +249,7 @@ func _do_loot(ai):
 		for i in wanted:
 			await get_tree().create_timer(GRAB_TIME, false).timeout
 			if !_still_looting(ai) || ai.container.loot.size() >= CARRY_LIMIT || !_has_loot(target): break
-			var item = target.AILoot()
+			var item = _take_fitting(ai, target)
 			if item == null: break
 			ai.container.loot.append(item)
 			ai.PlayPickup()
@@ -394,6 +396,49 @@ func _live_ai() -> Array:
 func _has_loot(c) -> bool:
 	if !is_instance_valid(c): return false
 	return !(c.storage if c.storaged else c.loot).is_empty()
+
+## Like vanilla LootContainer.AILoot() (a random item, removed from the container), but only from items that will fit
+## on the AI's body. null = empty, or nothing left in it fits.
+func _take_fitting(ai, c):
+	var pool: Array = c.storage if c.storaged else c.loot
+	var fitting := []
+	for i in pool.size():
+		if _fits(ai.container, pool[i].itemData.size): fitting.append(i)
+	if fitting.is_empty(): return null
+	var index: int = fitting.pick_random()
+	var item = pool[index]
+	pool.remove_at(index)
+	return item
+
+## Would an item of this size still show up when the player opens this body? Opening a body deletes whatever doesn't
+## fit its grid, so this replays vanilla Interface.FillContainerGrid: each loot entry in order goes to the first free
+## cell (row by row), rotated if it doesn't fit upright, and is dropped if it doesn't fit either way.
+func _fits(body, size: Vector2) -> bool:
+	var w := int(clamp(body.containerSize.x, 4, 8))
+	var h := int(clamp(body.containerSize.y, 1, 13))
+	var grid := []
+	grid.resize(w * h)
+	grid.fill(false)
+	for slot in body.loot:
+		_place(grid, w, h, slot.itemData.size)
+	return _place(grid, w, h, size)
+
+func _place(grid: Array, w: int, h: int, size: Vector2) -> bool:
+	for s in [Vector2i(int(size.x), int(size.y)), Vector2i(int(size.y), int(size.x))]:
+		for y in h:
+			for x in w:
+				if grid[y * w + x] || !_free(grid, w, h, x, y, s): continue
+				for dy in s.y:
+					for dx in s.x: grid[(y + dy) * w + x + dx] = true
+				return true
+	return false
+
+func _free(grid: Array, w: int, h: int, x: int, y: int, s: Vector2i) -> bool:
+	if x + s.x > w || y + s.y > h: return false
+	for dy in s.y:
+		for dx in s.x:
+			if grid[(y + dy) * w + x + dx]: return false
+	return true
 
 func _is_corpse(c) -> bool:
 	return c.owner != null && "variant" in c.owner

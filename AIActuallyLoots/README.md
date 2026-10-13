@@ -11,6 +11,7 @@ targets itself and hands them to the game's own looting, animation and inventory
 
 - **AI loot houses.** Calm AI (not alerted or fighting) walk to nearby containers, open them once and grab 1-3
   items into their own inventory. Kill them and you'll find the loot on the body.
+  They only take what fits in their inventory and stop once it's full, so nothing they pick up gets lost.
 - **They actually search.** AI don't know what's inside until they look: they check containers, find nothing in the
   empty ones and move on, and sweep the other containers in the same room or house before leaving. They remember
   what they've already searched.
@@ -48,7 +49,7 @@ Bosses are left alone.
 ## Troubleshooting
 
 The log is at `%APPDATA%\Road to Vostok\logs\godot.log` (written when the game closes). Look for
-`[AIActuallyLoots] v1.1.6 loaded`. Every item an AI takes is logged as `[AIActuallyLoots] <AI> looted <item>`.
+`[AIActuallyLoots] v1.1.7 loaded`. Every item an AI takes is logged as `[AIActuallyLoots] <AI> looted <item>`.
 
 ## Credits
 
