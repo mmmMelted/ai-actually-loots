@@ -11,7 +11,9 @@ targets itself and hands them to the game's own looting, animation and inventory
 
 - **AI loot houses.** Calm AI (not alerted or fighting) walk to nearby containers, open them once and grab 1-3
   items into their own inventory. Kill them and you'll find the loot on the body.
-  They only take what fits in their inventory and stop once it's full, so nothing they pick up gets lost.
+  They only take what fits in their inventory, so nothing they pick up gets lost. Once they're full they **trade
+  up**: they swap their cheapest item for a clearly more valuable one and leave the cheap one behind (in the
+  container, or on the floor if it doesn't fit).
 - **They actually search.** AI don't know what's inside until they look: they check containers, find nothing in the
   empty ones and move on, and sweep the other containers in the same room or house before leaving. They remember
   what they've already searched.
@@ -26,9 +28,18 @@ targets itself and hands them to the game's own looting, animation and inventory
 
 Bosses are left alone.
 
+## Settings
+
+With [Mod Configuration Menu](https://modworkshop.net/mod/53713) installed, AI Actually Loots has its own page in the
+MCM menu. Without it, edit `%APPDATA%\Road to Vostok\MCM\AIActuallyLoots\config.ini` (created on first launch):
+
+- **Loot sound volume (%)**: how loud AI are when they open containers and pick items up. 100 = the game's own
+  volume (heard from far away), 0 = silent. Default 50.
+- **Full AI trade up**: on by default. Off = AI stop looting once their inventory is full.
+
 ## Requirements
 
-- Road to Vostok Build 2 ("Nomads", v0.2.0.0), Godot 4.6.3.
+- Road to Vostok Build 2 ("Nomads"), v0.2.0.0 through v0.2.2.0 (Godot 4.6.3).
 - [Metro Mod Loader](https://github.com/ametrocavich/vostok-mod-loader) v3.4.1 or newer (uses its RTVModLib hooks).
 
 ## Download
@@ -50,11 +61,13 @@ yourself with `python build.py`).
 - Single player. Safe to add to or remove from an existing save (it stores nothing in your save).
 - Works with other AI mods, as long as they don't also replace the AI's `Loot` function (the loader will warn in the
   log if one does).
+- Pairs with [Bandit Senses](https://github.com/mmmMelted/bandit-senses), which leaves all looting to this mod:
+  with both installed, AI hearing you sends looting hiders back into ambush sooner.
 
 ## Troubleshooting
 
 The log is at `%APPDATA%\Road to Vostok\logs\godot.log` (written when the game closes). Look for
-`[AIActuallyLoots] v1.1.7 loaded`. Every item an AI takes is logged as `[AIActuallyLoots] <AI> looted <item>`.
+`[AIActuallyLoots] v1.2.0 loaded`. Every item an AI takes is logged as `[AIActuallyLoots] <AI> looted <item>`.
 
 ## Credits
 

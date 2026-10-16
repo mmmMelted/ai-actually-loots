@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+- Full AI trade up: once their inventory is full they keep looting, swapping their cheapest item for a clearly more
+  valuable one (at least 1.5x and 10 more). The cheap item goes into the container, or on the floor if it doesn't fit.
+- Loot sound volume setting (default 50% of the game's volume; 0 = silent): AI opening containers and picking items
+  up could be heard from far away.
+- Settings in Mod Configuration Menu (MCM) when it's installed, otherwise in
+  %APPDATA%\Road to Vostok\MCM\AIActuallyLoots\config.ini.
+
 ## 1.1.7
 - Fixed looted items disappearing: when an AI's inventory was full, items that didn't fit its grid were deleted the
   first time you opened the body. AI now only take items that fit, and stop looting once nothing more fits.

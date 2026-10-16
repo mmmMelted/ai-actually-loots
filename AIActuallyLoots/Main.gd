@@ -8,6 +8,10 @@ extends Node
 ## - Calm AI (not alerted or fighting) walk to nearby containers and take 1-3 items into their own inventory (you find
 ##   them on the body), only what fits their inventory grid. Bandits loot often; Guards and Military only very rarely
 ##   (about once per 5 / 10 calm minutes); Nomads never loot.
+## - Full AI keep looting by trading up: they swap their cheapest item for a clearly more valuable one, leaving the
+##   cheap one in the container (or on the floor when it doesn't fit there).
+## - Loot sound volume and trading up are set in Mod Configuration Menu (MCM) when installed, otherwise in
+##   user://MCM/AIActuallyLoots/config.ini.
 ## - Hiders (AI waiting in ambush in houses) loot the house instead of standing still, return to their hide spot, and
 ##   drop everything to get back into ambush the moment something approaches.
 ## - After a kill, the killer loots the body once things calm down; other calm AI scavenge fresh bodies nearby
@@ -16,7 +20,7 @@ extends Node
 ## Bosses are left alone. Works on its own or alongside other AI mods.
 
 
-const VERSION := "1.1.7"
+const VERSION := "1.2.0"
 const TAG := "[AIActuallyLoots] "
 
 
@@ -43,9 +47,22 @@ const BOTS_PER_FRAME := 2
 ## Checks come every ~3 s while calm: Guards loot about once per 5 calm minutes, Military about once per 10.
 const WILL := {AIData.Faction.Bandit: 0.5, AIData.Faction.Guard: 0.01, AIData.Faction.Military: 0.005}
 const HIDER_WILL := 0.85
+## Trading up: take a container item only if it's worth at least SWAP_RATIO times, and SWAP_MIN more than, the
+## carried item it replaces (so AI don't shuffle near-equal items back and forth).
+const SWAP_RATIO := 1.5
+const SWAP_MIN := 10.0
+
+
+const MCM_HELPERS := "res://ModConfigurationMenu/Scripts/Doink Oink/MCM_Helpers.tres"
+const MCM_ID := "AIActuallyLoots"
+const MCM_DIR := "user://MCM/AIActuallyLoots"
+const MCM_FILE := "config.ini"
 
 
 var _lib = null
+## 0..1, applied to the game's own loot sounds (open container, pick up item).
+var _volume := 0.5
+var _swap := true
 var _containers := []
 var _corpses := []
 var _bots := []
@@ -55,7 +72,8 @@ var _tickIndex := 0
 
 
 func _ready():
-	print(TAG + "v" + VERSION + " loaded")
+	_load_config()
+	print(TAG + "v" + VERSION + " loaded (loot volume " + str(roundi(_volume * 100.0)) + "%, trading up " + ("on" if _swap else "off") + ")")
 	Engine.set_meta("AIActuallyLoots", self)
 	get_tree().node_added.connect(_on_node_added)
 	if Engine.has_meta("RTVModLib"):
@@ -75,6 +93,46 @@ func _on_lib_ready():
 
 func _on_node_added(node):
 	if node is LootContainer: _containers.append(node)
+
+
+
+## ------------------------------------------------------------------------------------------------ settings
+
+## Same file whether or not MCM is installed: MCM shows it as a menu, without MCM it can be edited by hand.
+func _load_config():
+	DirAccess.make_dir_recursive_absolute(MCM_DIR)
+	var path := MCM_DIR.path_join(MCM_FILE)
+	var defaults := _config_defaults()
+	var config := ConfigFile.new()
+	if config.load(path) != OK: config = defaults
+	else:
+		for section in defaults.get_sections():
+			for key in defaults.get_section_keys(section):
+				var want: Dictionary = defaults.get_value(section, key)
+				var have = config.get_value(section, key, null)
+				# Keep the player's value, refresh the rest (names, tooltips, ranges) from this version.
+				if have is Dictionary && have.has("value"): want["value"] = have["value"]
+				config.set_value(section, key, want)
+	config.save(path)
+	_apply_config(config)
+	var helpers = load(MCM_HELPERS) if ResourceLoader.exists(MCM_HELPERS) else null
+	if helpers != null && helpers.has_method("RegisterConfiguration"):
+		helpers.RegisterConfiguration(MCM_ID, "AI Actually Loots", MCM_DIR,
+			"AI loot houses and bodies when calm. Kill them and you'll find the loot on the body.", {MCM_FILE: _apply_config})
+
+func _config_defaults() -> ConfigFile:
+	var c := ConfigFile.new()
+	c.set_value("Int", "loot_volume", {"name": "Loot sound volume (%)", "default": 50, "value": 50, "minRange": 0, "maxRange": 100,
+		"tooltip": "How loud AI are when they open containers and pick items up. 100 = the game's own volume, 0 = silent."})
+	c.set_value("Bool", "trade_up", {"name": "Full AI trade up", "default": true, "value": true,
+		"tooltip": "When an AI's inventory is full, it swaps its cheapest item for a clearly more valuable one, leaving the cheap one in the container (or on the floor if it doesn't fit)."})
+	return c
+
+func _apply_config(config: ConfigFile):
+	var v = config.get_value("Int", "loot_volume", {})
+	if v is Dictionary && v.has("value"): _volume = clamp(float(v["value"]) / 100.0, 0.0, 1.0)
+	var s = config.get_value("Bool", "trade_up", {})
+	if s is Dictionary && s.has("value"): _swap = bool(s["value"])
 
 
 
@@ -103,9 +161,9 @@ func _tick(ai, now: float):
 
 	# Nomads never loot (houses, bodies or their own kills).
 	if ai.variant.faction == AIData.Faction.Nomad: return
-	if !_calm(ai) || ai.reload || ai.container == null || ai.container.loot.size() >= CARRY_LIMIT: return
-	# Inventory full: not even a 1x1 item would fit.
-	if !_fits(ai.container, Vector2.ONE): return
+	if !_calm(ai) || ai.reload || ai.container == null: return
+	# Inventory full (item limit, or not even a 1x1 item fits): only go on looting to trade up.
+	if !_swap && _full(ai): return
 	var states = ai.State
 	var state: int = ai.currentState
 	var hider: bool = state == states.Ambush
@@ -244,15 +302,16 @@ func _do_loot(ai):
 	var target = ai.lootTarget
 	var taken := 0
 	if is_instance_valid(target) && target is LootContainer:
-		ai.PlayLoot()
+		_play(ai, target.audioEvent)
 		var wanted: int = int(ai.get_meta("aal_loot")["left"]) if ai.has_meta("aal_loot") else 1
 		for i in wanted:
 			await get_tree().create_timer(GRAB_TIME, false).timeout
-			if !_still_looting(ai) || ai.container.loot.size() >= CARRY_LIMIT || !_has_loot(target): break
-			var item = _take_fitting(ai, target)
+			if !_still_looting(ai) || !_has_loot(target): break
+			var item = _take_fitting(ai, target) if ai.container.loot.size() < CARRY_LIMIT else null
+			if item == null && _swap: item = _trade_up(ai, target)
 			if item == null: break
 			ai.container.loot.append(item)
-			ai.PlayPickup()
+			_play(ai, ai.audioLibrary.pickup)
 			taken += 1
 			print(TAG + ai.name + " looted " + str(item.itemData.name) + (" from a body" if _is_corpse(target) else ""))
 	await get_tree().create_timer(0.6 if taken == 0 else 0.8, false).timeout
@@ -410,16 +469,110 @@ func _take_fitting(ai, c):
 	pool.remove_at(index)
 	return item
 
+## Full: at the item limit, or not even a 1x1 item fits.
+func _full(ai) -> bool:
+	return ai.container.loot.size() >= CARRY_LIMIT || !_fits(ai.container, Vector2.ONE)
+
+## Trade up: swap the carried item that gains the most for a clearly more valuable one in the container, if the new one
+## fits once the old one is out. The old one goes into the container where it fits, otherwise on the floor. Returns
+## the taken item (already removed from the container), or null when nothing is worth swapping.
+func _trade_up(ai, c):
+	var pool: Array = c.storage if c.storaged else c.loot
+	var carried: Array = ai.container.loot
+	var bestIn := -1
+	var bestOut := -1
+	var bestGain := 0.0
+	for i in pool.size():
+		var worthIn := _worth(pool[i])
+		for j in carried.size():
+			var worthOut := _worth(carried[j])
+			if worthIn < max(worthOut * SWAP_RATIO, worthOut + SWAP_MIN) || worthIn - worthOut <= bestGain: continue
+			var rest := carried.duplicate()
+			rest.remove_at(j)
+			if !_fits_in(ai.container.containerSize, rest, pool[i].itemData.size): continue
+			bestIn = i
+			bestOut = j
+			bestGain = worthIn - worthOut
+	if bestIn == -1: return null
+	var taken = pool[bestIn]
+	pool.remove_at(bestIn)
+	var left = carried[bestOut]
+	carried.remove_at(bestOut)
+	# A container the player has opened keeps fixed grid positions: don't guess one, drop instead.
+	if !c.storaged && _fits_in(c.containerSize, c.loot, left.itemData.size):
+		c.loot.append(left)
+		print(TAG + ai.name + " swapped " + str(left.itemData.name) + " for " + str(taken.itemData.name))
+	else:
+		_drop(ai, left)
+		print(TAG + ai.name + " dropped " + str(left.itemData.name) + " for " + str(taken.itemData.name))
+	return taken
+
+## What the item is worth, like vanilla Item.Value(): ammo by how full the box is, magazines and weapons plus the rounds
+## in them, everything but electronics scaled by condition.
+func _worth(slot) -> float:
+	var data = slot.itemData
+	var value := float(data.value)
+	if (data.type == "Ammo" || data.file == "Matches") && data.defaultAmount > 0:
+		value *= float(slot.amount) / float(data.defaultAmount)
+	var ammo = null
+	if data.subtype == "Magazine" && !data.compatible.is_empty(): ammo = data.compatible[0]
+	elif data.type == "Weapon": ammo = data.get("ammo")
+	if ammo != null && ammo.defaultAmount > 0:
+		value += float(ammo.value) / float(ammo.defaultAmount) * (slot.amount + (1 if data.type == "Weapon" && slot.chamber else 0))
+	if data.type != "Electronics": value *= slot.condition * 0.01
+	return value
+
+## On the floor in front of the AI, as a normal pickup (vanilla Interface.Drop, split into boxes for stacks).
+func _drop(ai, slot):
+	var scene = get_node("/root/Database").get(slot.itemData.file)
+	var map = get_tree().current_scene
+	if scene == null || map == null:
+		print(TAG + "can't drop " + str(slot.itemData.name) + ": no pickup scene")
+		return
+	var forward: Vector3 = ai.global_basis.z
+	var amounts := [slot.amount]
+	var box: int = slot.itemData.defaultAmount
+	if slot.itemData.stackable && box > 0 && slot.amount > box:
+		amounts = []
+		var left: int = slot.amount
+		while left > 0:
+			amounts.append(min(left, box))
+			left -= box
+	for amount in amounts:
+		var pickup = scene.instantiate()
+		map.add_child(pickup)
+		pickup.global_position = ai.global_position + Vector3.UP * 1.0 + forward * 0.4
+		pickup.rotation_degrees = Vector3(-25, ai.rotation_degrees.y + randf_range(-45, 45), 45)
+		var copy := SlotData.new()
+		copy.Update(slot)
+		copy.amount = amount
+		pickup.slotData.Update(copy)
+		pickup.Unfreeze()
+		pickup.linear_velocity = forward * 1.0
+
+## The game's loot sound at the container, at the configured volume (vanilla AI.PlayLoot / PlayPickup).
+func _play(ai, event):
+	if _volume <= 0.0 || event == null || !is_instance_valid(ai.lootTarget): return
+	var audio = ai.audioInstance3D.instantiate()
+	get_tree().get_root().add_child(audio)
+	audio.global_position = ai.lootTarget.global_position
+	audio.PlayInstance(event, 8, 100)
+	audio.volume_db += linear_to_db(_volume)
+	audio.panning_strength = 2.0
+
 ## Would an item of this size still show up when the player opens this body? Opening a body deletes whatever doesn't
 ## fit its grid, so this replays vanilla Interface.FillContainerGrid: each loot entry in order goes to the first free
 ## cell (row by row), rotated if it doesn't fit upright, and is dropped if it doesn't fit either way.
 func _fits(body, size: Vector2) -> bool:
-	var w := int(clamp(body.containerSize.x, 4, 8))
-	var h := int(clamp(body.containerSize.y, 1, 13))
+	return _fits_in(body.containerSize, body.loot, size)
+
+func _fits_in(containerSize: Vector2, loot: Array, size: Vector2) -> bool:
+	var w := int(clamp(containerSize.x, 4, 8))
+	var h := int(clamp(containerSize.y, 1, 13))
 	var grid := []
 	grid.resize(w * h)
 	grid.fill(false)
-	for slot in body.loot:
+	for slot in loot:
 		_place(grid, w, h, slot.itemData.size)
 	return _place(grid, w, h, size)
 
